@@ -7,6 +7,79 @@ import locale
 import argparse
 import os
 import math
+import io
+import msoffcrypto
+import openpyxl
+import csv
+import time
+# from docx2pdf import convert
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
+
+def convert_to_pdf(docx_path, output_dir):
+    """
+    Convert a single Word document to PDF.
+    
+    Args:
+        docx_path (str): Path to the Word document
+        output_dir (str): Directory where PDF should be saved
+    Returns:
+        str: Path to the generated PDF file
+    """
+    try:
+        # Create PDF filename from Word filename
+        pdf_filename = os.path.splitext(os.path.basename(docx_path))[0] + '.pdf'
+        pdf_path = os.path.join(output_dir, pdf_filename)
+        
+        # convert(docx_path, pdf_path)
+        
+        return pdf_path
+    except Exception as e:
+        print(f"Error converting {docx_path} to PDF: {str(e)}")
+        return None
+
+def batch_convert_to_pdf(output_dir):
+    """
+    Convert all Word documents in the output directory to PDF.
+    
+    Args:
+        output_dir (str): Directory containing Word documents
+    Returns:
+        tuple: (successful_conversions, failed_conversions)
+    """
+    pdf_dir = os.path.join(output_dir, 'pdf')
+    os.makedirs(pdf_dir, exist_ok=True)
+    
+    # Get all Word documents in the directory
+    docx_files = [f for f in os.listdir(output_dir) if f.endswith('.docx')]
+    
+    successful = []
+    failed = []
+    
+    print("\nConverting Word documents to PDF...")
+    
+    # Use ThreadPoolExecutor for parallel processing
+    with ThreadPoolExecutor() as executor:
+        # Create a list of futures
+        futures = []
+        for docx_file in docx_files:
+            docx_path = os.path.join(output_dir, docx_file)
+            future = executor.submit(convert_to_pdf, docx_path, pdf_dir)
+            futures.append((docx_file, future))
+        
+        # Process results with progress bar
+        for docx_file, future in tqdm(futures, desc="Converting", unit="file"):
+            try:
+                pdf_path = future.result()
+                if pdf_path:
+                    successful.append(docx_file)
+                else:
+                    failed.append(docx_file)
+            except Exception as e:
+                print(f"\nError converting {docx_file}: {str(e)}")
+                failed.append(docx_file)
+    
+    return successful, failed
 
 def load_and_prepare_bank_data(csv_path):
     """Load bank CSV file and extract relevant columns with proper encoding handling."""
@@ -45,11 +118,7 @@ def load_address_data(excel_path, password=None):
     Returns:
         pandas.DataFrame: The loaded address data
     """
-    try:
-        import io
-        import msoffcrypto
-        import openpyxl
-        
+    try:        
         # Create a BytesIO object for the decrypted content
         decrypted_workbook = io.BytesIO()
         
@@ -230,8 +299,12 @@ def format_date(date_int):
     """
     try:
         # Convert integer to string and pad with leading zeros if necessary
-        date_str = str(date_int).zfill(6)
-        
+        date_str = str(date_int)
+        if len(date_str) < 6:
+          date_str = str(date_int).zfill(6)
+        elif len(date_str) == 7:
+          date_str = str(date_int).zfill(8)
+
         # Extract components
         day = date_str[:2]
         month = date_str[2:4]
@@ -239,10 +312,8 @@ def format_date(date_int):
         
         # Convert two-digit year to four-digit year
         year_int = int(year)
-        if year_int < 70:
+        if year_int < 100:
             year = f"20{year}"
-        else:
-            year = f"19{year}"
         
         # Return formatted date
         return f"{day}.{month}.{year}"
@@ -261,9 +332,6 @@ def amount_to_words(amount) -> str:
 
     if cents > 0:
         amount_str += ' und ' + num2words(round(cents * 100), lang='de') + ' Cent'
-
-    # if len(amount_str) > 50:
-    #     print(f" ! WARNING ! Possible line break for <<BETRAG_WORTE>>: {amount_str}")
 
     return amount_str
 
@@ -354,11 +422,53 @@ def generate_receipt(template_path, donor_info, amount, transaction_date):
         print(f"Error generating receipt: {str(e)}")
         raise
 
+def create_receipt_log(file_name, output_dir):
+    """Create a CSV file for logging receipt information."""
+    log_file = os.path.join(output_dir, file_name)
+    headers = [
+        'Date Generated',
+        'Donor Name',
+        'Street',
+        'Postal Code',
+        'City',
+        'Donation Amount',
+        'Donation Amount Words',
+        'Donation Date',
+        'Match Score',
+        'Receipt Filename'
+    ]
+    
+    with open(log_file, 'w', newline='', encoding='utf-8-sig') as f:
+        writer = csv.writer(f, delimiter=';')
+        writer.writerow(headers)
+    
+    return log_file
+
+def log_receipt(log_file, receipt_data):
+    """Log receipt information to CSV file."""
+    with open(log_file, 'a', newline='', encoding='utf-8-sig') as f:
+        writer = csv.writer(f, delimiter=';')
+        writer.writerow([
+            receipt_data['generation_date'],
+            receipt_data['donor_name'],
+            receipt_data['street'],
+            receipt_data['postal_code'],
+            receipt_data['city'],
+            receipt_data['amount'],
+            receipt_data['amount_words'],
+            receipt_data['donation_date'],
+            receipt_data['match_score'],
+            receipt_data['filename']
+        ])
+
 def process_donations(args):
     """Main function to process all donations and generate receipts."""
     try:
         # Create output directory if it doesn't exist
         os.makedirs(args.output_dir, exist_ok=True)
+        
+        # Create receipt log file
+        log_file = create_receipt_log(args.output_log, args.output_dir)
         
         # Load data
         print("Loading bank data...")
@@ -389,10 +499,31 @@ def process_donations(args):
                     # Generate receipt
                     receipt = generate_receipt(args.template, donor_info, amount, transaction_date)
                     
-                    # Save receipt
+                    # Generate filename
                     safe_name = "".join(x for x in donor_info['Name'].strip() if x.isalnum())
-                    filename = f'{args.output_dir}/Spendenbescheinigung_{safe_name}_{format_date(transaction_date)}.docx'
-                    receipt.save(filename)
+                    filename = f'Spendenbescheinigung_{safe_name}_{format_date(transaction_date)}.docx'
+                    full_path = os.path.join(args.output_dir, filename)
+                    
+                    # Save receipt
+                    receipt.save(full_path)
+                    
+                    # Prepare receipt data for logging
+                    receipt_data = {
+                        'generation_date': datetime.now().strftime('%d.%m.%Y'),
+                        'donor_name': donor_info['Name'].strip(),
+                        'street': donor_info['Straße'].strip(),
+                        'postal_code': str(donor_info['PLZ']).strip(),
+                        'city': donor_info['Ort'].strip(),
+                        'amount': f'{amount:.2f}'.replace('.', ',') + ' EUR',
+                        'amount_words': amount_to_words(amount),
+                        'donation_date': format_date(transaction_date),
+                        'match_score': match_score,
+                        'filename': filename
+                    }
+                    
+                    # Log receipt information
+                    log_receipt(log_file, receipt_data)
+                    
                     print(f'Generated receipt for {donor_name} (match score: {match_score}%)')
                     total_matched += 1
                 else:
@@ -404,11 +535,15 @@ def process_donations(args):
                 print(f"Error processing donation for {donor_name}: {str(e)}")
                 continue
         
+        # TODO: Convert all generated Word documents to PDF; this needs docx2pdf running on WSL
+        # successful_conversions, failed_conversions = batch_convert_to_pdf(args.output_dir)
+
         # Print summary
         print(f"\nProcessing complete!")
         print(f"Total donations processed: {total_processed}")
         print(f"Successfully matched and generated: {total_matched}")
         print(f"Could not find matches for: {len(no_matches)} donations")
+        print(f"\nReceipt log saved to: {log_file}")
         
         if no_matches:
             print("\nDonors with no matching address found:")
@@ -430,6 +565,8 @@ if __name__ == '__main__':
                       help='Path to Word template file')
     parser.add_argument('--output-dir', required=True,
                       help='Output directory for generated receipts')
+    parser.add_argument('--output-log',
+                      help='CSV file to log the generated receips to.')
     parser.add_argument('--password',
                       help='Password for protected Excel file', 
                       default=None)
