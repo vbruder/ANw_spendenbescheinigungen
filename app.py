@@ -19,7 +19,7 @@ class DonationReceiptApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Donation Receipt Generator")
-        self.root.geometry("1200x800")
+        self.root.geometry("1400x800")
 
         # Data storage
         self.address_df: Optional[pd.DataFrame] = None
@@ -113,7 +113,7 @@ class DonationReceiptApp:
             row=0, column=0, sticky=tk.W
         )
         self.address_file_var = tk.StringVar(value=self.config["address_file"])
-        ttk.Entry(file_frame, textvariable=self.address_file_var, width=120).grid(
+        ttk.Entry(file_frame, textvariable=self.address_file_var, width=150).grid(
             row=0, column=1, padx=5
         )
         ttk.Button(file_frame, text="Browse", command=self.browse_address_file).grid(
@@ -132,7 +132,7 @@ class DonationReceiptApp:
             row=1, column=0, sticky=tk.W, pady=(5, 0)
         )
         self.bank_file_var = tk.StringVar(value=self.config["bank_file"])
-        ttk.Entry(file_frame, textvariable=self.bank_file_var, width=120).grid(
+        ttk.Entry(file_frame, textvariable=self.bank_file_var, width=150).grid(
             row=1, column=1, pady=(5, 0), padx=5
         )
         ttk.Button(file_frame, text="Browse", command=self.browse_bank_file).grid(
@@ -164,6 +164,7 @@ class DonationReceiptApp:
                 "amount",
                 "date",
                 "match_score",
+                "purpose",
             ),
             show="headings",
             selectmode="browse",
@@ -179,6 +180,7 @@ class DonationReceiptApp:
             "amount": "Amount (EUR)",
             "date": "Date",
             "match_score": "Match Score",
+            "purpose": "Purpose",
         }
 
         # Set up columns with initial width and headers
@@ -313,7 +315,7 @@ class DonationReceiptApp:
             row=0, column=0, sticky=tk.W
         )
         self.template_file_var = tk.StringVar(value=self.config["template_file"])
-        ttk.Entry(output_frame, textvariable=self.template_file_var, width=140).grid(
+        ttk.Entry(output_frame, textvariable=self.template_file_var, width=150).grid(
             row=0, column=1, padx=5
         )
         ttk.Button(output_frame, text="Browse", command=self.browse_template_file).grid(
@@ -325,7 +327,7 @@ class DonationReceiptApp:
             row=1, column=0, sticky=tk.W, pady=(5, 0)
         )
         self.output_dir_var = tk.StringVar(value=self.config["output_dir"])
-        ttk.Entry(output_frame, textvariable=self.output_dir_var, width=140).grid(
+        ttk.Entry(output_frame, textvariable=self.output_dir_var, width=150).grid(
             row=1, column=1, padx=5, pady=(5, 0)
         )
         ttk.Button(output_frame, text="Browse", command=self.browse_output_dir).grid(
@@ -342,7 +344,7 @@ class DonationReceiptApp:
             row=2, column=0, sticky=tk.W, pady=(5, 0)
         )
         self.output_dir_pdf_var = tk.StringVar(value=self.config["output_dir_pdf"])
-        ttk.Entry(output_frame, textvariable=self.output_dir_pdf_var, width=140).grid(
+        ttk.Entry(output_frame, textvariable=self.output_dir_pdf_var, width=150).grid(
             row=2, column=1, padx=5, pady=(5, 0)
         )
         ttk.Button(output_frame, text="Browse", command=self.browse_output_dir_pdf).grid(
@@ -445,6 +447,7 @@ class DonationReceiptApp:
                 donor_name = donation[1]["Beguenstigter/Zahlungspflichtiger"]
                 amount = float(str(donation[1]["Betrag"]).replace(",", "."))
                 date = donation[1]["Buchungstag"]
+                purpose = donation[1]["Verwendungszweck"]
 
                 # Find best match
                 best_match, score = self.find_best_match(donor_name)
@@ -460,6 +463,7 @@ class DonationReceiptApp:
                     "amount": f"{amount:.2f}",
                     "date": self.format_date(date),
                     "match_score": f"{score:.1f}" if score > 0 else "0.0",
+                    "purpose": purpose,
                 }
 
                 self.matched_data.append(match_data)
@@ -533,7 +537,7 @@ class DonationReceiptApp:
                 )
 
                 return df[
-                    ["Buchungstag", "Beguenstigter/Zahlungspflichtiger", "Betrag"]
+                    ["Buchungstag", "Beguenstigter/Zahlungspflichtiger", "Betrag", "Verwendungszweck"]
                 ]
 
             except UnicodeDecodeError:
@@ -556,6 +560,7 @@ class DonationReceiptApp:
             donor_name = donation["Beguenstigter/Zahlungspflichtiger"]
             amount = float(str(donation["Betrag"]).replace(",", "."))
             date = donation["Buchungstag"]
+            purpose = donation["Verwendungszweck"]
 
             # Find best match
             best_match, score = self.find_best_match(donor_name)
@@ -569,6 +574,7 @@ class DonationReceiptApp:
                 "amount": f"{amount:.2f}",
                 "date": date,
                 "match_score": f"{score:.1f}" if score > 0 else "0.0",
+                "purpose": purpose,
             }
 
             self.matched_data.append(match_data)
@@ -612,7 +618,7 @@ class DonationReceiptApp:
             last_name = words[-1]
             for i in range(len(words) - 2, 0, -1):
                 if words[i] == last_name:
-                    return [" ".join(words[:i]), " ".join(words[i:])]
+                    return [" ".join(words[:i+1]), " ".join(words[i+1:])]
 
         # If no pattern found, return as single name
         return [full_name]
@@ -752,6 +758,7 @@ class DonationReceiptApp:
                     data["amount"],
                     data["date"],
                     data["match_score"],
+                    data["purpose"],
                 ),
                 tags=tags,
             )
@@ -832,6 +839,7 @@ class DonationReceiptApp:
                     "amount": dialog.result[5],
                     "date": dialog.result[6],
                     "match_score": dialog.result[7],
+                    "purpose": "",
                 }
             )
 
@@ -1128,18 +1136,24 @@ class EditDialog(tk.Toplevel):
             "Amount (EUR)",
             "Date",
             "Match Score",
+            "Purpose",
         ]
         self.entries = {}
 
         for i, field in enumerate(fields):
             entry = ttk.Entry(self)
-            if i > 0 and i < len(fields) - 1:
+            # ignore name on bank statement, match score and purpose
+            if i > 0 and i < len(fields) - len(["Match Score", "Purpose"]):
                 ttk.Label(self, text=field, anchor="w").grid(
                     row=i, column=0, padx=5, pady=5
                 )
                 entry.grid(row=i, column=1, padx=5, pady=5)
             if values:
-                entry.insert(0, values[i])
+                # insert bank statement name in case of not match
+                if field == 'Matched Name' and values[i] == '':
+                    entry.insert(0, values[i-1]) 
+                else:
+                    entry.insert(0, values[i])
 
             self.entries[field] = entry
 
