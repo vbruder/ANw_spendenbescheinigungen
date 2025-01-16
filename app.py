@@ -20,6 +20,7 @@ class DonationReceiptApp:
         self.root = root
         self.root.title("Donation Receipt Generator")
         self.root.geometry("1400x800")
+        self.root.iconbitmap('icon.ico')
 
         # Data storage
         self.address_df: Optional[pd.DataFrame] = None
@@ -491,19 +492,35 @@ class DonationReceiptApp:
     def load_address_data(
         self, excel_path: str, password: Optional[str]
     ) -> pd.DataFrame:
-        """Load the address Excel file"""
+        """
+        Load the address Excel file, handling both encrypted and unencrypted files.
+        First tries to load the file directly, falls back to decryption if needed.
+        
+        Args:
+            excel_path: Path to the Excel file
+            password: Optional password for encrypted files
+        
+        Returns:
+            pandas.DataFrame: Loaded data from the Excel file
+        """
         try:
-            decrypted_workbook = io.BytesIO()
+            # First try to load the file directly
+            try:
+                workbook = openpyxl.load_workbook(filename=excel_path)
+            except:
+                try:
+                    # If direct load fails, try decryption
+                    decrypted_workbook = io.BytesIO()
+                    with open(excel_path, "rb") as file:
+                        office_file = msoffcrypto.OfficeFile(file)
+                        if password:
+                            office_file.load_key(password=password)
+                        office_file.decrypt(decrypted_workbook)
+                    workbook = openpyxl.load_workbook(filename=decrypted_workbook)
+                except:
+                    raise Exception(f"Decryption failed, check the entered password.")
 
-            with open(excel_path, "rb") as file:
-                office_file = msoffcrypto.OfficeFile(file)
-                if password:
-                    office_file.load_key(password=password)
-                office_file.decrypt(decrypted_workbook)
-
-            workbook = openpyxl.load_workbook(filename=decrypted_workbook)
             sheet = workbook.active
-
             data = []
             headers = [cell.value for cell in sheet[1]]
 
