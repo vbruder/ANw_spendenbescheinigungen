@@ -20,7 +20,10 @@ class DonationReceiptApp:
         self.root = root
         self.root.title("Donation Receipt Generator")
         self.root.geometry("1400x800")
-        self.root.iconbitmap('icon.ico')
+        try:
+            self.root.iconbitmap('icon.ico')
+        except:
+            print("Could not find icon.ico in executable path.")
 
         # Data storage
         self.address_df: Optional[pd.DataFrame] = None
@@ -52,6 +55,8 @@ class DonationReceiptApp:
             "bank_file": "",
             "template_file": "",
             "output_dir": "",
+            "log_dir": "",
+            "output_dir_pdf": "",
             "geometry": "",
         }
 
