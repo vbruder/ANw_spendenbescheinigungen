@@ -12,8 +12,8 @@ import openpyxl
 import json
 import os.path
 from docx2pdf import convert
-from tqdm import tqdm
-
+# from tqdm import tqdm
+import csv
 
 class DonationReceiptApp:
     def __init__(self, root):
@@ -72,6 +72,7 @@ class DonationReceiptApp:
                 "bank_file": self.bank_file_var.get(),
                 "template_file": self.template_file_var.get(),
                 "output_dir": self.output_dir_var.get(),
+                "log_dir": self.log_dir_var.get(),
                 "output_dir_pdf": self.output_dir_pdf_var.get(),
                 "geometry": self.root.geometry(),
             }
@@ -334,27 +335,31 @@ class DonationReceiptApp:
         ttk.Button(output_frame, text="Browse", command=self.browse_output_dir).grid(
             row=1, column=2, pady=(5, 0)
         )
-
         # generate receipts
         ttk.Button(
             output_frame, text="Generate Receipts", command=self.generate_receipts
         ).grid(row=1, column=3,  pady=(5, 0))
 
+        # Log Output Directory Selection
+        ttk.Label(output_frame, text="Log Output Directory").grid(row=2, column=0, sticky=tk.W, pady=(5, 0))
+        self.log_dir_var = tk.StringVar(value=self.config["log_dir"])
+        ttk.Entry(output_frame, textvariable=self.log_dir_var, width=150).grid(row=2, column=1, padx=5, pady=(5, 0))
+        ttk.Button(output_frame, text="Browse", command=self.browse_log_dir).grid(row=2, column=2, pady=(5, 0))
+
         # Output Directory PDF
         ttk.Label(output_frame, text="Output Directory (pdf)").grid(
-            row=2, column=0, sticky=tk.W, pady=(5, 0)
+            row=3, column=0, sticky=tk.W, pady=(5, 0)
         )
         self.output_dir_pdf_var = tk.StringVar(value=self.config["output_dir_pdf"])
         ttk.Entry(output_frame, textvariable=self.output_dir_pdf_var, width=150).grid(
-            row=2, column=1, padx=5, pady=(5, 0)
+            row=3, column=1, padx=5, pady=(5, 0)
         )
         ttk.Button(output_frame, text="Browse", command=self.browse_output_dir_pdf).grid(
-            row=2, column=2, pady=(5, 0)
+            row=3, column=2, pady=(5, 0)
         )
-
         ttk.Button(
             output_frame, text="Convert to PDFs", command=self.convert_to_pdfs
-        ).grid(row=2, column=3, pady=(5, 0))
+        ).grid(row=3, column=3, pady=(5, 0))
 
     def browse_template_file(self):
         """Open file dialog for template file selection"""
@@ -414,6 +419,15 @@ class DonationReceiptApp:
         )
         if directory:
             self.output_dir_pdf_var.set(directory)
+            self.save_config()
+
+    def browse_log_dir(self):
+        """Open directory dialog for output log selection"""
+        directory = filedialog.askdirectory(
+            initialdir=self.log_dir_var.get() if self.log_dir_var.get() else None
+        )
+        if directory:
+            self.log_dir_var.set(directory)
             self.save_config()
 
     def load_data(self):
@@ -565,6 +579,57 @@ class DonationReceiptApp:
         raise ValueError(
             "Could not read the CSV file with any of the attempted encodings"
         )
+
+    def log_receipt(self, receipt_data):
+        """Log receipt information to year-specific CSV files in the selected directory."""
+        # Determine the year from the donation date
+        donation_date = datetime.strptime(receipt_data['donation_date'], "%d.%m.%Y")
+        year = donation_date.year
+        log_file = os.path.join(self.log_dir_var.get(), f"spendenbescheinigungen_{year}.csv")
+
+        headers = [
+            'Date Generated',
+            'Donor Name',
+            'Street',
+            'Postal Code',
+            'City',
+            'Donation Amount',
+            'Donation Amount Words',
+            'Donation Date',
+            'Receipt Filename'
+        ]
+
+        # Check if the file exists; create it with headers if it doesn't
+        if not os.path.exists(log_file):
+            with open(log_file, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f, delimiter=';')
+                writer.writerow(headers)
+
+        # Check for duplicate entries
+        try:
+            with open(log_file, 'r', encoding='utf-8-sig') as f:
+                existing_data = list(csv.reader(f, delimiter=';'))
+        except FileNotFoundError:
+            existing_data = []
+
+        new_entry = [
+            receipt_data['generation_date'],
+            receipt_data['donor_name'],
+            receipt_data['street'],
+            receipt_data['postal_code'],
+            receipt_data['city'],
+            receipt_data['amount'],
+            receipt_data['amount_words'],
+            receipt_data['donation_date'],
+            receipt_data['filename']
+        ]
+
+        # Append entry if not already present
+        if new_entry not in existing_data:
+            with open(log_file, 'a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f, delimiter=';')
+                writer.writerow(new_entry)
+
 
     def process_matches(self):
         """Process and match the loaded data"""
@@ -1110,6 +1175,21 @@ class DonationReceiptApp:
         safe_name = "".join(x for x in data["matched_name"].strip() if x.isalnum())
         filename = f"Spendenbescheinigung_{safe_name}_{donation_date}.docx"
         doc.save(os.path.join(output_dir, filename))
+
+        # log the receipt
+        receipt_data = {
+                        'generation_date': replacements['<<DATUM_HEUTE>>'],
+                        'donor_name': replacements['<<NAME>>'],
+                        'street': replacements['<<STRASSE>>'],
+                        'postal_code': replacements['<<PLZ>>'],
+                        'city': replacements['<<ORT>>'],
+                        'amount': replacements['<<BETRAG>>'],
+                        'amount_words': replacements['<<BETRAG_WORTE>>'],
+                        'donation_date': replacements['<<DATUM_SPENDE>>'],
+                        'filename': filename
+                    }
+        self.log_receipt(receipt_data)
+
 
     def amount_to_words(self, amount):
         """Convert amount to German words"""
