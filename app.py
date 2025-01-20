@@ -213,8 +213,9 @@ class DonationReceiptApp:
         data_frame.columnconfigure(0, weight=1)
         data_frame.rowconfigure(0, weight=1)
 
-        # Bind double-click event for editing
+        # Bind events
         self.tree.bind("<Double-1>", self.edit_entry)
+        self.tree.bind("<Delete>", lambda event: self.remove_entry()) 
 
         # Add buttons for data management
         button_frame = ttk.Frame(data_frame)
@@ -226,6 +227,28 @@ class DonationReceiptApp:
         ttk.Button(
             button_frame, text="Update Address File", command=self.update_address_file
         ).pack(side=tk.LEFT, padx=5)
+        ttk.Button(
+            button_frame, text="Remove Entry", command=self.remove_entry
+        ).pack(side=tk.LEFT, padx=5)
+
+    def remove_entry(self):
+        """Remove the selected entry from the table and matched_data"""
+        selected_items = self.tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Warning", "Please select an entry to remove.")
+            return
+
+        if messagebox.askyesno("Confirm Removal", "Are you sure you want to remove this entry?"):
+            for item in selected_items:
+                # Get the index of the item in the tree
+                idx = self.tree.index(item)
+                
+                # Remove from matched_data list
+                if 0 <= idx < len(self.matched_data):
+                    self.matched_data.pop(idx)
+                
+                # Remove from treeview
+                self.tree.delete(item)
 
     def convert_to_pdf(self, docx_path, output_dir):
         """
