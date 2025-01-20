@@ -5,6 +5,7 @@ import pandas as pd
 from thefuzz import fuzz
 import os
 from datetime import datetime
+from dateutil import parser
 from typing import Optional, Dict, List
 import msoffcrypto
 import io
@@ -489,7 +490,7 @@ class DonationReceiptApp:
 
                 donor_name = donation[1]["Beguenstigter/Zahlungspflichtiger"]
                 amount = float(str(donation[1]["Betrag"]).replace(",", "."))
-                date = donation[1]["Buchungstag"]
+                date = self.format_date_str(donation[1]["Buchungstag"])
                 purpose = donation[1]["Verwendungszweck"]
 
                 # Find best match
@@ -504,7 +505,7 @@ class DonationReceiptApp:
                     "postal_code": best_match["PLZ"] if best_match is not None else "",
                     "city": best_match["Ort"] if best_match is not None else "",
                     "amount": f"{amount:.2f}",
-                    "date": self.format_date(date),
+                    "date": date,
                     "match_score": f"{score:.1f}" if score > 0 else "0.0",
                     "purpose": purpose,
                 }
@@ -592,7 +593,6 @@ class DonationReceiptApp:
                     sep=delimiter,
                     encoding=encoding,
                     decimal=",",
-                    thousands=".",
                 )
 
                 return df[
@@ -853,8 +853,15 @@ class DonationReceiptApp:
 
         # Add new items
         for data in self.matched_data:
-            # Determine if this is an unmatched entry
-            tags = ("unmatched",) if not data["matched_name"] else ()
+            # Determine the appropriate tag based on match score
+            if not data["matched_name"]:
+                tags = ("unmatched",)
+            elif float(data["match_score"]) < 80:
+                tags = ("low_score",)
+            elif float(data["match_score"]) < 95:
+                tags = ("medium_score",)
+            else:
+                tags = ()
 
             self.tree.insert(
                 "",
@@ -874,7 +881,10 @@ class DonationReceiptApp:
             )
 
         # Configure tag colors
-        self.tree.tag_configure("unmatched", background="#ffcccc")
+        self.tree.tag_configure("unmatched", background="#ffcccc")  # Light red for unmatched
+        self.tree.tag_configure("low_score", background="#ff6666")  # Red for low scores (< 80)
+        self.tree.tag_configure("medium_score", background="#ffff99")  # Yellow for medium scores (80-95)
+
 
         # Auto-adjust column widths
         self.adjust_column_widths()
@@ -1068,7 +1078,7 @@ class DonationReceiptApp:
         except Exception as e:
             messagebox.showerror("Error", f"Error converting docs to PDFs: {str(e)}")
 
-    def format_date(self, date_int):
+    def format_date(self, date_int: int):
         """
         Convert date from integer format (DDMMYY) to German date string (DD.MM.YYYY).
 
@@ -1101,6 +1111,17 @@ class DonationReceiptApp:
         except Exception as e:
             print(f"Error formatting date {date_int}: {str(e)}")
             return str(date_int)
+
+    def format_date_str(self, date_str: str):
+        """Parse a date string and format it as dd.mm.YYYY."""
+        try:
+            # Use dateutil's parser to handle different formats
+            parsed_date = parser.parse(date_str, dayfirst=True)
+            # Format the date as dd.mm.YYYY
+            formatted_date = parsed_date.strftime("%d.%m.%Y")
+            return formatted_date
+        except ValueError:
+            return "Invalid date format"
 
     def generate_single_receipt(self, data, output_dir, template_path):
         """Generate a single donation receipt"""
