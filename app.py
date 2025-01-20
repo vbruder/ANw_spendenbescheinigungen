@@ -911,7 +911,7 @@ class DonationReceiptApp:
         values = self.tree.item(item)["values"]
 
         # Create edit dialog
-        dialog = EditDialog(self.root, values)
+        dialog = EditDialog(self.root, self.address_df, values)
         self.root.wait_window(dialog)
 
         if dialog.result:
@@ -931,7 +931,7 @@ class DonationReceiptApp:
 
     def add_new_entry(self):
         """Add a new address entry"""
-        dialog = EditDialog(self.root)
+        dialog = EditDialog(self.root, self.address_df)
         self.root.wait_window(dialog)
 
         if dialog.result:
@@ -1246,10 +1246,22 @@ class DonationReceiptApp:
 class EditDialog(tk.Toplevel):
     """Dialog for editing or adding entries"""
 
-    def __init__(self, parent, values=None):
+    def __init__(self, parent, address_df, values=None):
         super().__init__(parent)
         self.title("Edit Entry" if values else "Add Entry")
         self.result = None
+        
+        # Make dialog resizable
+        self.resizable(True, True)
+        
+        # Create main frame
+        main_frame = ttk.Frame(self)
+        main_frame.grid(row=0, column=0, sticky="nsew")
+        
+        # Configure grid weights for resizing
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(1, weight=1)
 
         # Create and populate fields
         fields = [
@@ -1265,38 +1277,55 @@ class EditDialog(tk.Toplevel):
         ]
         self.entries = {}
 
+        # Create a frame for address fields and search button
+        address_frame = ttk.Frame(main_frame)
+        address_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        address_frame.grid_columnconfigure(1, weight=1)
+
         for i, field in enumerate(fields):
-            entry = ttk.Entry(self)
+            entry = ttk.Entry(main_frame)
             # ignore name on bank statement, match score and purpose
             if i > 0 and i < len(fields) - len(["Match Score", "Purpose"]):
-                ttk.Label(self, text=field, anchor="w").grid(
-                    row=i, column=0, padx=5, pady=5
-                )
-                entry.grid(row=i, column=1, padx=5, pady=5)
+                label = ttk.Label(main_frame, text=field, anchor="e")
+                label.grid(row=i, column=0, padx=(10, 5), pady=5, sticky="e")
+                entry.grid(row=i, column=1, padx=(5, 10), pady=5, sticky="ew")
+                
+                # Make entry wider (doubled size)
+                entry.configure(width=40)  # Default was typically around 20
+
             if values:
                 # insert bank statement name in case of not match
                 if field == 'Matched Name' and values[i] == '':
-                    entry.insert(0, values[i-1]) 
+                    entry.insert(0, values[i-1])
                 else:
                     entry.insert(0, values[i])
 
             self.entries[field] = entry
 
         # Buttons
-        btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=len(fields), column=0, columnspan=2, pady=10)
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=len(fields), column=0, columnspan=3, pady=10)
 
+        ttk.Button(btn_frame, text="Search Address List", command=lambda: self.search_address_list(address_df)).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Save", command=self.save).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Cancel", command=self.cancel).pack(
-            side=tk.LEFT, padx=5
-        )
+        ttk.Button(btn_frame, text="Cancel", command=self.cancel).pack(side=tk.LEFT, padx=5)
+
+        # Set minimum size
+        self.update_idletasks()
+        min_width = max(240, self.winfo_width())
+        min_height = max(240, self.winfo_height())
+        self.minsize(min_width, min_height)
 
         # Make dialog modal
         self.transient(parent)
         self.grab_set()
 
         # Center the dialog
-        self.update_idletasks()  # Update geometry to calculate sizes
+        self.center_dialog(parent)
+
+    def center_dialog(self, parent):
+        """Center the dialog relative to parent window"""
+        self.update_idletasks()
         parent_x = parent.winfo_rootx()
         parent_y = parent.winfo_rooty()
         parent_width = parent.winfo_width()
@@ -1310,6 +1339,30 @@ class EditDialog(tk.Toplevel):
 
         self.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
 
+    def search_address_list(self, address_df):
+        """Open search dialog for address list"""
+        # if not hasattr(parent, "address_df") or parent.address_df is None:
+        if address_df is None:
+            messagebox.showerror("Error", "No address data loaded!")
+            return
+            
+        search_dialog = AddressSearchDialog(self, address_df)
+        self.wait_window(search_dialog)
+        
+        if search_dialog.selected_address is not None:
+            # Update address fields with selected data
+            self.entries["Matched Name"].delete(0, tk.END)
+            self.entries["Matched Name"].insert(0, search_dialog.selected_address["Name"])
+            
+            self.entries["Street"].delete(0, tk.END)
+            self.entries["Street"].insert(0, search_dialog.selected_address["Straße"])
+            
+            self.entries["Postal Code"].delete(0, tk.END)
+            self.entries["Postal Code"].insert(0, search_dialog.selected_address["PLZ"])
+            
+            self.entries["City"].delete(0, tk.END)
+            self.entries["City"].insert(0, search_dialog.selected_address["Ort"])
+
     def save(self):
         """Save the edited values"""
         self.result = [entry.get().replace(",", ".") for entry in self.entries.values()]
@@ -1319,6 +1372,145 @@ class EditDialog(tk.Toplevel):
         """Cancel the edit"""
         self.destroy()
 
+class AddressSearchDialog(tk.Toplevel):
+    """Dialog for searching and selecting addresses"""
+    
+    def __init__(self, parent, address_df):
+        super().__init__(parent)
+        self.title("Search Address List")
+        self.address_df = address_df
+        self.selected_address = None
+        
+        # Make dialog resizable
+        self.resizable(True, True)
+        
+        # Configure grid weights
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        
+        # Search frame
+        search_frame = ttk.Frame(self)
+        search_frame.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+        search_frame.grid_columnconfigure(1, weight=1)
+        
+        ttk.Label(search_frame, text="Search:").grid(row=0, column=0, padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_var.trace("w", self.update_list)
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
+        search_entry.grid(row=0, column=1, sticky="ew")
+        
+        # Create Treeview
+        self.tree = ttk.Treeview(
+            self,
+            columns=("name", "street", "postal_code", "city"),
+            show="headings",
+            selectmode="browse"
+        )
+        
+        # Configure columns
+        self.tree.heading("name", text="Name")
+        self.tree.heading("street", text="Street")
+        self.tree.heading("postal_code", text="Postal Code")
+        self.tree.heading("city", text="City")
+        
+        # Configure column widths
+        self.tree.column("name", width=150)
+        self.tree.column("street", width=150)
+        self.tree.column("postal_code", width=100)
+        self.tree.column("city", width=100)
+        
+        # Add scrollbars
+        y_scroll = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.tree.yview)
+        x_scroll = ttk.Scrollbar(self, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+        
+        # Grid layout
+        self.tree.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+        y_scroll.grid(row=1, column=1, sticky="ns")
+        x_scroll.grid(row=2, column=0, sticky="ew")
+        
+        # Buttons
+        btn_frame = ttk.Frame(self)
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=10)
+        
+        ttk.Button(btn_frame, text="Select", command=self.select_address).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=self.cancel).pack(side=tk.LEFT, padx=5)
+        
+        # Initial population of list
+        self.update_list()
+        
+        # Make dialog modal
+        self.transient(parent)
+        self.grab_set()
+        
+        # Set minimum size and center
+        self.update_idletasks()
+        self.minsize(600, 400)
+        self.center_dialog(parent)
+        
+        # Set focus to search entry
+        search_entry.focus_set()
+        
+    def center_dialog(self, parent):
+        """Center the dialog relative to parent window"""
+        self.update_idletasks()
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+
+        dialog_width = self.winfo_width()
+        dialog_height = self.winfo_height()
+
+        x = parent_x + (parent_width - dialog_width) // 2
+        y = parent_y + (parent_height - dialog_height) // 2
+
+        self.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+        
+    def update_list(self, *args):
+        """Update the list based on search criteria"""
+        # Clear current items
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        search_term = self.search_var.get().lower()
+        
+        # Filter and add matching items
+        for _, row in self.address_df.iterrows():
+            if (search_term == "" or 
+                search_term in str(row["Name"]).lower() or
+                search_term in str(row["Straße"]).lower() or
+                search_term in str(row["PLZ"]).lower() or
+                search_term in str(row["Ort"]).lower()):
+                
+                self.tree.insert("", "end", values=(
+                    row["Name"],
+                    row["Straße"],
+                    row["PLZ"],
+                    row["Ort"]
+                ))
+    
+    def select_address(self):
+        """Handle address selection"""
+        selected_items = self.tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Warning", "Please select an address.")
+            return
+            
+        # Get selected item's values
+        values = self.tree.item(selected_items[0])["values"]
+        self.selected_address = {
+            "Name": values[0],
+            "Straße": values[1],
+            "PLZ": values[2],
+            "Ort": values[3]
+        }
+        self.destroy()
+        
+    def cancel(self):
+        """Cancel selection"""
+        self.selected_address = None
+        self.destroy()
 
 class ProgressDialog(tk.Toplevel):
     """Dialog showing progress during receipt generation"""
